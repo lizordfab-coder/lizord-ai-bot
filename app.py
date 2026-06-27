@@ -7,7 +7,9 @@ app = Flask(__name__)
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
+VERIFY_TOKEN = os.environ["VERIFY_TOKEN"]
+WHATSAPP_TOKEN = os.environ["WHATSAPP_TOKEN"]
+PHONE_NUMBER_ID = os.environ["PHONE_NUMBER_ID"]
 
 
 @app.route("/")
@@ -15,7 +17,7 @@ def home():
     return "LIZORD AI Bot is Running!"
 
 
-# Meta Webhook Verification
+# WhatsApp Webhook Verification
 @app.route("/webhook", methods=["GET"])
 def verify():
     mode = request.args.get("hub.mode")
@@ -28,24 +30,77 @@ def verify():
     return "Forbidden", 403
 
 
+def send_whatsapp_message(to, text):
+    url = f"https://graph.facebook.com/v23.0/{PHONE_NUMBER_ID}/messages"
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "text",
+        "text": {
+            "body": text
+        }
+    }
+
+    r = requests.post(url, headers=headers, json=payload)
+    print(r.status_code, r.text)
+
+
 # WhatsApp Incoming Messages
 @app.route("/webhook", methods=["POST"])
 def webhook():
+
     data = request.get_json()
     print(data)
+
+    try:
+        value = data["entry"][0]["changes"][0]["value"]
+
+        if "messages" in value:
+
+            sender = value["messages"][0]["from"]
+            user_message = value["messages"][0]["text"]["body"]
+
+            response = client.responses.create(
+                model="gpt-5.5",
+                input=[
+                    {
+                        "role": "system",
+                        "content": "You are LIZORD AI Assistant. Reply in Hindi unless the user requests another language."
+                    },
+                    {
+                        "role": "user",
+                        "content": user_message
+                    }
+                ]
+            )
+
+            reply = response.output_text
+
+            send_whatsapp_message(sender, reply)
+
+    except Exception as e:
+        print("ERROR:", e)
+
     return "EVENT_RECEIVED", 200
 
 
-# AI Chat API
+# Test API
 @app.route("/chat", methods=["POST"])
 def chat():
+
     data = request.get_json()
 
     message = data.get("message", "")
 
-    response = client.chat.completions.create(
+    response = client.responses.create(
         model="gpt-5.5",
-        messages=[
+        input=[
             {
                 "role": "system",
                 "content": "You are LIZORD AI Assistant."
@@ -58,7 +113,7 @@ def chat():
     )
 
     return jsonify({
-        "reply": response.choices[0].message.content
+        "reply": response.output_text
     })
 
 
